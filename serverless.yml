@@ -1,0 +1,103 @@
+service: aws-training
+
+plugins:
+  - finalize-stack-plugin
+
+provider:
+  name: aws
+  stage_default: dev
+  region_default: us-east-1
+  stage: ${opt:stage, self:provider.stage_default}
+  region: ${opt:region, self:provider.region_default}
+  profile: ${opt:profile}
+  account: ${opt:account}
+  lambdaRole: "arn:aws:iam::${self:provider.account}:role/${self:service}-${self:provider.stage}-${self:provider.region}-lambdaRole"
+  contentBucketName: "content-folder-rydu574-${self:service}-${self:provider.stage}"
+  contentBucketArn: "arn:aws:s3:::${self:provider.contentBucketName}"
+  versionFunctions: false
+  timeout: 30
+  cfLogs: true
+  environment: ${file(serverless-env.yml):${self:provider.stage}}
+  logs:
+    restApi: true
+  apiGateway:
+    binaryMediaTypes:
+      - 'image/jpeg'
+      - 'image/jpg'
+      - 'image/png'
+      - 'image/gif'
+      - 'application/octet-stream'
+      - 'binary/octet-stream'
+      - 'multipart/form-data'
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "s3:PutObject"
+        - "s3:GetObject"
+        - "s3:ListBucket"
+      Resource:
+        - Fn::Sub: "${self:provider.contentBucketArn}/*"
+
+functions:
+  S3Proxy:
+    handler: src/handler.lambda_handler
+    runtime: python3.7
+    events:
+      - http:
+          path: upload/{key}
+          method: post
+          integration: lambda
+          authorizer:
+            name: CustomAuthorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+            type: token
+          request:
+            passThrough: WHEN_NO_TEMPLATES
+            template:
+              image/jpg: |
+                {
+                  "imageKey": "$input.params('key')",
+                  "content": "$input.body"
+                }
+
+  CustomAuthorizer:
+    handler: src/authorizer.auth
+    runtime: python3.7
+
+resources:
+  Resources:
+    S3ProxyLogGroup:
+      Properties:
+        RetentionInDays: 1
+    CustomAuthorizerLogGroup:
+      Properties:
+        RetentionInDays: 1
+    AppBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.contentBucketName}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+
+    AppBucketPolicy:
+      DependsOn:
+        - "AppBucket"
+        - "IamRoleLambdaExecution"
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket:
+          Ref: "AppBucket"
+        PolicyDocument:
+          Statement:
+            -
+              Action:
+                - "s3:ListBucket"
+              Effect: "Allow"
+              Resource: ${self:provider.contentBucketArn}
+              Principal:
+                AWS:
+                  - ${self:provider.lambdaRole}
