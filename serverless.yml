@@ -39,6 +39,20 @@ provider:
         - Fn::Sub: "${self:provider.contentBucketArn}/*"
 
 functions:
+  hello:
+    handler: src/handler.hello
+    runtime: nodejs12.x
+    events:
+      - http:
+          path: hello
+          method: post
+          cors: true
+          authorizer:
+            name: DemoCustomAuthorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+            type: request
+
   S3Proxy:
     handler: src/handler.lambda_handler
     runtime: python3.7
@@ -63,6 +77,10 @@ functions:
 
   CustomAuthorizer:
     handler: src/authorizer.auth
+    runtime: python3.7
+
+  DemoCustomAuthorizer:
+    handler: src/demo_authorizer.auth
     runtime: python3.7
 
 resources:
